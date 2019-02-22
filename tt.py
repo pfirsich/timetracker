@@ -10,6 +10,10 @@ DB_PATH = os.path.join(appdirs.user_data_dir("tt", "", roaming=True), "ttDb.json
 #DB_PATH = r"ttDb_test.json"
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
+class DummyObject(object):
+    def __getattr__(self, name):
+        return None
+
 def getActivites(db):
     activities = set()
     for activity in db:
@@ -64,6 +68,19 @@ def infoCommand(args, db):
             for activity in activities:
                 print("{} for {}".format(getActivityName(activity["name"]), secondsToStr(time.time() - activity["started"])))
 
+        if args.day:
+            firstToday = None
+            last24h = time.time() - 24*60*60
+            for _i, activity in enumerate(reversed(db)):
+                i = len(db) - 1 - _i
+                if activity["started"] > last24h:
+                    firstToday = i
+
+            for i in range(firstToday, len(db)):
+                activity = db[i]
+                if "finished" in activity:
+                    print("{} for {}".format(getActivityName(activity["name"]), secondsToStr(time.time() - activity["started"])))
+
 def pushActivity(activityName, db, comment=None):
     parent = None
     for activity in reversed(db):
@@ -94,7 +111,7 @@ def pushCommand(args, db):
 
     writeDb(db)
 
-    infoCommand(args, db)
+    infoCommand(DummyObject(), db)
 
 def popCommand(args, db):
     popStart = None
@@ -112,7 +129,7 @@ def popCommand(args, db):
 
         writeDb(db)
 
-        infoCommand(args, db)
+        infoCommand(DummyObject(), db)
     else:
         print("No current activity.")
 
@@ -136,10 +153,10 @@ def main():
         db = []
 
     parser = argparse.ArgumentParser(prog="tt", description="Time tracker")
-    parser.set_defaults(func=infoCommand)
     subparsers = parser.add_subparsers(dest="command", help="command")
 
     parserInfo = subparsers.add_parser("info", help="Print current activity (and duration)")
+    parserInfo.add_argument("--day", action="store_true")
     parserInfo.set_defaults(func=infoCommand)
 
     activityCompleter = ActivityCompleter(db)
