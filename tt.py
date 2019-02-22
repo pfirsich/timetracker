@@ -3,21 +3,18 @@ import json
 import os
 import time
 
-# TODO:
-# * Make "tt" without a subcommand print the same output as "tt info"
-# * Let "tt info" print the duration of each individual activity on the stack
-#   e.g. for work / break
-#   work for 4h
-#   break for 20m
-# * Handle DB_PATH properly: https://pypi.org/project/appdirs/
-# * Add activity completion: https://argcomplete.readthedocs.io/en/latest/
+import appdirs
+#import argcomplete
 
-DB_PATH = r"C:\Users\Joel\ttDb.json"
+DB_PATH = os.path.join(appdirs.user_data_dir("tt", "", roaming=True), "ttDb.json")
+#DB_PATH = r"ttDb_test.json"
+os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 def getActivites(db):
-    activities = []
+    activities = set()
     for activity in db:
-        activities.append(activity["name"])
+        activities.update(activity["name"])
+    return list(activities)
 
 def getActivityName(activityName):
     return " / ".join(activityName)
@@ -39,17 +36,33 @@ def writeDb(db):
     with open(DB_PATH, "w") as f:
         json.dump(db, f, indent=4)
 
+def findActivityParents(db, activityIndex):
+    parents = []
+    for subListLen in range(len(db[activityIndex]["name"]), 0, -1):
+        subName = db[activityIndex]["name"][:subListLen]
+        for i in range(activityIndex, -1, -1):
+            if not "finished" in db[i] and db[i]["name"] == subName:
+                parents.append(db[i])
+    parents.reverse()
+    return parents
+
 def infoCommand(args, db):
     if len(db) == 0:
         print("No activities logged.")
     else:
-        for activity in reversed(db):
+        activities = None
+        for _i, activity in enumerate(reversed(db)):
+            i = len(db) - 1 - _i
             if not "finished" in activity:
-                print("Current activity: {}".format(getActivityName(activity["name"])))
-                print("Begun {} ago.".format(secondsToStr(time.time() - activity["started"])))
+                activities = findActivityParents(db, i)
                 break
         else:
             print("No current activity.")
+
+        if activities:
+            print("Current activity: {}".format(getActivityName(activities[-1]["name"])))
+            for activity in activities:
+                print("{} for {}".format(getActivityName(activity["name"]), secondsToStr(time.time() - activity["started"])))
 
 def pushActivity(activityName, db, comment=None):
     parent = None
@@ -92,7 +105,6 @@ def popCommand(args, db):
             break
 
     if popStart != None:
-        print(popStart, len(db))
         for i in range(popStart, len(db)):
             if not "finished" in db[i]:
                 db[i]["finished"] = int(time.time())
@@ -109,35 +121,44 @@ def activitiesCommand(args, db):
     for activityName in sorted(activities):
         print(activityName)
 
+class ActivityCompleter(object):
+    def __init__(self, db):
+        self.activities = getActivites(db)
+
+    def __call__(self, **kwargs):
+        return self.activities
+
 def main():
-    parser = argparse.ArgumentParser(prog="tt", description="Time tracker")
-    subparsers = parser.add_subparsers(dest="command", help="command")
-    subparsers.required = True
-
-    parserInfo = subparsers.add_parser("info", help="Print current activity (and duration)")
-    parserInfo.set_defaults(func=infoCommand)
-
-    parserPush = subparsers.add_parser("push", help="push activity on the activity stack")
-    parserPush.add_argument("activity", nargs="+", help="A list of activities")
-    parserPush.add_argument("--comment", "-c", help="Additional comment for the activity")
-    parserPush.set_defaults(func=pushCommand)
-
-    parserPop = subparsers.add_parser("pop", help="pop activity from the activity stack")
-    parserPop.add_argument("activity", nargs="?", help="May be an activity by name")
-    parserPop.add_argument("--comment", "-c", help="Additional comment for the activity")
-    parserPop.set_defaults(func=popCommand)
-
-    parserActivities = subparsers.add_parser("activities", help="List known activities")
-    parserActivities.set_defaults(func=activitiesCommand)
-
-    args = parser.parse_args()
-
     if os.path.isfile(DB_PATH):
         with open(DB_PATH) as f:
             db = json.load(f)
     else:
         db = []
 
+    parser = argparse.ArgumentParser(prog="tt", description="Time tracker")
+    parser.set_defaults(func=infoCommand)
+    subparsers = parser.add_subparsers(dest="command", help="command")
+
+    parserInfo = subparsers.add_parser("info", help="Print current activity (and duration)")
+    parserInfo.set_defaults(func=infoCommand)
+
+    activityCompleter = ActivityCompleter(db)
+
+    parserPush = subparsers.add_parser("push", help="push activity on the activity stack")
+    parserPush.add_argument("activity", nargs="+", help="A list of activities")#.completer = activityCompleter
+    parserPush.add_argument("--comment", "-c", help="Additional comment for the activity")
+    parserPush.set_defaults(func=pushCommand)
+
+    parserPop = subparsers.add_parser("pop", help="pop activity from the activity stack")
+    parserPop.add_argument("activity", nargs="?", help="May be an activity by name")#.completer = activityCompleter
+    parserPop.add_argument("--comment", "-c", help="Additional comment for the activity")
+    parserPop.set_defaults(func=popCommand)
+
+    parserActivities = subparsers.add_parser("activities", help="List known activities")
+    parserActivities.set_defaults(func=activitiesCommand)
+
+    #argcomplete.autocomplete(parser)
+    args = parser.parse_args()
     args.func(args, db)
 
 if __name__ == "__main__":
